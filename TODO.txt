@@ -1,0 +1,26 @@
+done:
+- deterministic event kernel, virtual time, seed-reproducible
+- fault-injectable network (drop/delay/partition/heal)
+- fault-injectable storage (torn writes/corruption/skip-sync/reorder/crash)
+- raft example: election + replication + fast-backtrack, 5000-seed no-split-brain test
+- kv example: WAL store, checksum on/off comparison, proved corruption with a real seed
+- found and fixed 2 real bugs via the harness itself (map-iteration determinism bug, storage byte-addressability bug)
+- cmd/detsim CLI to run examples directly instead of through go test
+- git init, pushed to github.com/arshnah/detsim
+
+todo:
+- raft snapshotting / log compaction
+- linearizable reads (ReadIndex or lease reads)
+- cluster membership changes (add/remove node without full restart)
+- WAL replay idempotency test, crash during recovery
+- disk-full / out-of-space fault type in FaultyStorage
+- benchmarks
+- CI
+- godoc / pkg.go.dev polish
+
+rough edges:
+- examples/raft node IDs hardcoded to single uppercase letters, caps at 26 nodes
+- FaultyStorage grows its committed buffer but never shrinks/compacts
+- no fuzzing harness wired up yet (go-fuzz or go test -fuzz)
+- gosim-style real goroutine interception
+- extracting the deterministic scheduler as its own thing usable outside Go
