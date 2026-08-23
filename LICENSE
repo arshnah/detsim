@@ -1,0 +1,30 @@
+Copyright (C) 2025-2026 SparkLost. All Rights Reserved.
+
+"Software" refers to the source code, documentation, and all associated files
+in this repository.
+"Unmodified" means the Software in its original form, as published by the
+copyright holder, with no modifications, additions or deletions.
+"Binary" means any compiled or otherwise transformed version of the Software
+produced directly from Unmodified source code without intermediate modification.
+"you" means the licensee of rights set out in this license.
+"Review" means to access, read, analyze, test the Software without copying,
+storing, or redistributing it.
+
+You are permitted to:
+  1. Review the Software.
+  2. Redistribute the Unmodified Software, provided this license and copyright
+     notice are included in full.
+  3. Compile and redistribute Binaries built from the Unmodified Software,
+     provided this license and copyright notice are included in full.
+
+You may not:
+  1. Modify the Software and distribute the modified version in any form.
+  2. Use the Software or any part of it in another project without explicit
+     written permission from the copyright holder.
+  3. Sublicense or sell the Software or Binaries.
+
+THIS SOFTWARE IS PROVIDED "AS-IS", WITHOUT ANY WARRANTY, EXPRESS OR IMPLIED,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHOR AND COPYRIGHT HOLDER BE LIABLE FOR ANY DAMAGE,
+EFFECT, INTERFERENCE OR CLAIM CAUSED DIRECTLY OR INDIRECTLY BY THIS SOFTWARE.
