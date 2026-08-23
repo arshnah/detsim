@@ -2,26 +2,23 @@ Copyright (C) 2025-2026 Arshdeep Singh. All Rights Reserved.
 
 "Software" refers to the source code, documentation, and all associated files
 in this repository.
-"Unmodified" means the Software in its original form, as published by the
-copyright holder, with no modifications, additions or deletions.
-"Binary" means any compiled or otherwise transformed version of the Software
-produced directly from Unmodified source code without intermediate modification.
+"Fork" means any copy of the Software, modified or unmodified, that you
+create, compile, or redistribute.
 "you" means the licensee of rights set out in this license.
-"Review" means to access, read, analyze, test the Software without copying,
-storing, or redistributing it.
 
 You are permitted to:
-  1. Review the Software.
-  2. Redistribute the Unmodified Software, provided this license and copyright
-     notice are included in full.
-  3. Compile and redistribute Binaries built from the Unmodified Software,
-     provided this license and copyright notice are included in full.
+  1. Review, use, and modify the Software for any purpose.
+  2. Create and redistribute Forks, including modified versions, provided
+     this license and copyright notice are included in full and you clearly
+     credit Arshdeep Singh as the original author.
 
 You may not:
-  1. Modify the Software and distribute the modified version in any form.
-  2. Use the Software or any part of it in another project without explicit
-     written permission from the copyright holder.
-  3. Sublicense or sell the Software or Binaries.
+  1. Remove or alter this license or copyright notice from the Software or
+     any Fork.
+  2. Claim original authorship of the Software or any Fork, or present it as
+     your own original work.
+  3. Sublicense, sell, or relicense the Software or any Fork under different
+     terms without explicit written permission from the copyright holder.
 
 THIS SOFTWARE IS PROVIDED "AS-IS", WITHOUT ANY WARRANTY, EXPRESS OR IMPLIED,
 INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY,
