@@ -18,11 +18,11 @@ func newCluster(seed int64, n int, dropRate float64) *cluster {
 	sim := detsim.New(seed)
 	net := detsim.NewNetwork(sim)
 	net.SetDropRate(dropRate)
-	net.SetDelayRange(1_000_000, 10_000_000) // 1-10ms in virtual nanoseconds
+	net.SetDelayRange(1_000_000, 10_000_000)
 
 	ids := make([]detsim.NodeID, n)
 	for i := range ids {
-		ids[i] = detsim.NodeID(rune('A' + i))
+		ids[i] = detsim.NodeID(fmt.Sprintf("node%d", i))
 	}
 
 	nodes := make(map[detsim.NodeID]*Node, n)
@@ -42,6 +42,22 @@ func (c *cluster) start() {
 	for _, id := range c.ids {
 		c.nodes[id].Start()
 	}
+}
+
+func (c *cluster) leader() *Node {
+	return c.leaderExcluding("")
+}
+
+func (c *cluster) leaderExcluding(skip detsim.NodeID) *Node {
+	for _, id := range c.ids {
+		if id == skip {
+			continue
+		}
+		if state, _ := c.nodes[id].State(); state == Leader {
+			return c.nodes[id]
+		}
+	}
+	return nil
 }
 
 func (c *cluster) leadersByTerm() map[int][]detsim.NodeID {
@@ -65,10 +81,29 @@ func assertNoSplitBrain(t *testing.T, seed int64, c *cluster) {
 	}
 }
 
+func TestClusterLargerThan26NodesWorks(t *testing.T) {
+	c := newCluster(1, 30, 0.0)
+	c.start()
+	c.sim.RunUntil(3_000_000_000)
+
+	l := c.leader()
+	if l == nil {
+		t.Fatal("no leader elected in a 30-node cluster")
+	}
+	idx, ok := l.Submit("hello-from-a-big-cluster")
+	if !ok {
+		t.Fatal("leader rejected submit")
+	}
+	c.sim.RunFor(1_000_000_000)
+	if l.lastApplied < idx {
+		t.Fatalf("expected the entry to commit even with 30 nodes, lastApplied=%d want >= %d", l.lastApplied, idx)
+	}
+}
+
 func TestSingleRunElectsLeaderAndReplicates(t *testing.T) {
 	c := newCluster(1, 5, 0.0)
 	c.start()
-	c.sim.RunUntil(2_000_000_000) // 2s virtual
+	c.sim.RunUntil(2_000_000_000)
 
 	var leader *Node
 	for _, n := range c.nodes {
@@ -84,7 +119,7 @@ func TestSingleRunElectsLeaderAndReplicates(t *testing.T) {
 	if !ok {
 		t.Fatal("leader rejected submit")
 	}
-	c.sim.RunUntil(c.sim.Now() + 1_000_000_000)
+	c.sim.RunFor(1_000_000_000)
 
 	for id, n := range c.nodes {
 		found := false
@@ -109,11 +144,11 @@ func TestThousandsOfSeedsNoSplitBrain(t *testing.T) {
 
 		ids := c.ids
 		c.net.Partition(ids[:2], ids[2:])
-		c.sim.RunUntil(c.sim.Now() + 3_000_000_000)
+		c.sim.RunFor(3_000_000_000)
 		assertNoSplitBrain(t, seed, c)
 
 		c.net.HealAll()
-		c.sim.RunUntil(c.sim.Now() + 2_000_000_000)
+		c.sim.RunFor(2_000_000_000)
 		assertNoSplitBrain(t, seed, c)
 	}
 }

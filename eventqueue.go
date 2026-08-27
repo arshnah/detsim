@@ -21,6 +21,7 @@ func (q *eventQueue) Pop() any {
 	old := *q
 	n := len(old)
 	item := old[n-1]
+	old[n-1] = nil
 	*q = old[:n-1]
 	return item
 }

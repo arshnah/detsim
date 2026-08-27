@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "raft", "raft or kv")
+	mode := flag.String("mode", "raft", "raft, kv, read, or membership")
 	seed := flag.Int64("seed", 1, "starting simulation seed")
 	trials := flag.Int("trials", 1, "number of seeds to try, starting at -seed")
 	nodes := flag.Int("nodes", 5, "number of raft nodes (raft mode)")
@@ -26,46 +26,63 @@ func main() {
 		runRaft(*seed, *trials, *nodes, *drop)
 	case "kv":
 		runKV(*seed, *trials, *tornRate, *corruptRate, *checksums)
+	case "read":
+		runRead(*seed, *trials, *nodes)
+	case "membership":
+		runMembership(*seed, *trials, *nodes)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown mode %q, use raft or kv\n", *mode)
+		fmt.Fprintf(os.Stderr, "unknown mode %q, use raft, kv, read, or membership\n", *mode)
 		os.Exit(1)
 	}
 }
 
+type raftCluster struct {
+	sim   *detsim.Sim
+	net   *detsim.Network
+	ids   []detsim.NodeID
+	nodes map[detsim.NodeID]*raft.Node
+}
+
+func newRaftCluster(seed int64, nodeCount int, dropRate float64) raftCluster {
+	sim := detsim.New(seed)
+	net := detsim.NewNetwork(sim)
+	net.SetDropRate(dropRate)
+	net.SetDelayRange(1_000_000, 10_000_000)
+
+	ids := make([]detsim.NodeID, nodeCount)
+	for i := range ids {
+		ids[i] = detsim.NodeID(fmt.Sprintf("node%d", i))
+	}
+	nodes := make(map[detsim.NodeID]*raft.Node, nodeCount)
+	for i, id := range ids {
+		var peers []detsim.NodeID
+		for _, other := range ids {
+			if other != id {
+				peers = append(peers, other)
+			}
+		}
+		nodes[id] = raft.NewNode(id, peers, net, sim, seed+int64(i)+1)
+	}
+	for _, id := range ids {
+		nodes[id].Start()
+	}
+	return raftCluster{sim: sim, net: net, ids: ids, nodes: nodes}
+}
+
 func runRaft(startSeed int64, trials, nodeCount int, dropRate float64) {
 	for seed := startSeed; seed < startSeed+int64(trials); seed++ {
-		sim := detsim.New(seed)
-		net := detsim.NewNetwork(sim)
-		net.SetDropRate(dropRate)
-		net.SetDelayRange(1_000_000, 10_000_000)
+		c := newRaftCluster(seed, nodeCount, dropRate)
 
-		ids := make([]detsim.NodeID, nodeCount)
-		for i := range ids {
-			ids[i] = detsim.NodeID(rune('A' + i))
-		}
-		nodesByID := make(map[detsim.NodeID]*raft.Node, nodeCount)
-		for i, id := range ids {
-			var peers []detsim.NodeID
-			for _, other := range ids {
-				if other != id {
-					peers = append(peers, other)
-				}
-			}
-			nodesByID[id] = raft.NewNode(id, peers, net, sim, seed+int64(i)+1)
-		}
-		for _, id := range ids {
-			nodesByID[id].Start()
-		}
-
+		sim, net, ids := c.sim, c.net, c.ids
 		sim.RunUntil(3_000_000_000)
 		net.Partition(ids[:nodeCount/2], ids[nodeCount/2:])
-		sim.RunUntil(sim.Now() + 3_000_000_000)
+		sim.RunFor(3_000_000_000)
 		net.HealAll()
-		sim.RunUntil(sim.Now() + 2_000_000_000)
+		sim.RunFor(2_000_000_000)
 
 		leadersByTerm := make(map[int][]detsim.NodeID)
 		for _, id := range ids {
-			state, term := nodesByID[id].State()
+			state, term := c.nodes[id].State()
 			if state == raft.Leader {
 				leadersByTerm[term] = append(leadersByTerm[term], id)
 			}
@@ -80,6 +97,109 @@ func runRaft(startSeed int64, trials, nodeCount int, dropRate float64) {
 		}
 		if !splitBrain {
 			fmt.Printf("seed=%d ok, no split brain, %d nodes, drop rate %.2f, final state: %v\n", seed, nodeCount, dropRate, leadersByTerm)
+		}
+	}
+}
+
+func runMembership(startSeed int64, trials, nodeCount int) {
+	for seed := startSeed; seed < startSeed+int64(trials); seed++ {
+		c := newRaftCluster(seed, nodeCount, 0.05)
+
+		sim, ids := c.sim, c.ids
+		sim.RunUntil(1_500_000_000)
+
+		var leader *raft.Node
+		for _, id := range ids {
+			if state, _ := c.nodes[id].State(); state == raft.Leader {
+				leader = c.nodes[id]
+				break
+			}
+		}
+		if leader == nil {
+			fmt.Printf("seed=%d skipped, no leader elected\n", seed)
+			continue
+		}
+
+		toRemove := ids[len(ids)-1]
+		if toRemove == leader.ID() {
+			toRemove = ids[len(ids)-2]
+		}
+		leader.ProposeRemoveNode(toRemove)
+		sim.RunFor(1_500_000_000)
+
+		splitBrain := false
+		leadersByTerm := make(map[int][]detsim.NodeID)
+		for _, id := range ids {
+			state, term := c.nodes[id].State()
+			if state == raft.Leader {
+				leadersByTerm[term] = append(leadersByTerm[term], id)
+			}
+		}
+		for term, leaders := range leadersByTerm {
+			if len(leaders) > 1 {
+				splitBrain = true
+				fmt.Printf("seed=%d SPLIT BRAIN after removing %s: term %d has leaders %v\n", seed, toRemove, term, leaders)
+			}
+		}
+		if !splitBrain {
+			fmt.Printf("seed=%d ok, removed %s, no split brain, cluster still healthy\n", seed, toRemove)
+		}
+	}
+}
+
+func runRead(startSeed int64, trials, nodeCount int) {
+	for seed := startSeed; seed < startSeed+int64(trials); seed++ {
+		c := newRaftCluster(seed, nodeCount, 0)
+
+		sim, ids := c.sim, c.ids
+		sim.RunUntil(2_000_000_000)
+
+		var staleLeader *raft.Node
+		var staleLeaderID detsim.NodeID
+		for _, id := range ids {
+			if state, _ := c.nodes[id].State(); state == raft.Leader {
+				staleLeader = c.nodes[id]
+				staleLeaderID = id
+				break
+			}
+		}
+		if staleLeader == nil {
+			fmt.Printf("seed=%d skipped, no leader elected before partition\n", seed)
+			continue
+		}
+
+		var isolated, rest []detsim.NodeID
+		for _, id := range ids {
+			if id == staleLeaderID {
+				isolated = append(isolated, id)
+			} else {
+				rest = append(rest, id)
+			}
+		}
+		net := c.net
+		net.Partition(isolated, rest)
+
+		for i := 0; i < 5; i++ {
+			for _, id := range rest {
+				if state, _ := c.nodes[id].State(); state == raft.Leader {
+					c.nodes[id].Submit(fmt.Sprintf("post-partition-%d", i))
+					break
+				}
+			}
+			sim.RunFor(300_000_000)
+		}
+
+		var result *bool
+		staleLeader.Read(func(ok bool) { result = &ok })
+		sim.RunFor(2_000_000_000)
+
+		switch {
+		case result == nil:
+			fmt.Printf("seed=%d ok, isolated leader's read never resolved (correct, it can't reach quorum)\n", seed)
+		case *result:
+			fmt.Printf("seed=%d SPLIT READ: isolated leader %s served a stale read as successful\n", seed, staleLeaderID)
+		default:
+			fmt.Printf("seed=%d ok, isolated leader %s correctly refused to serve a stale read\n", seed, staleLeaderID)
 		}
 	}
 }

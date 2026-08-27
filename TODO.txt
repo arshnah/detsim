@@ -7,20 +7,39 @@ done:
 - found and fixed 2 real bugs via the harness itself (map-iteration determinism bug, storage byte-addressability bug)
 - cmd/detsim CLI to run examples directly instead of through go test
 - git init, pushed to github.com/arshnah/detsim
+- raft snapshotting / log compaction, InstallSnapshot RPC, base-relative log indexing throughout, lagging-partitioned-follower catch-up test at 300 seeds
+- found a real footgun in the Sim timing API (RunUntil(Now()+delta) can silently stall), fixed with RunFor
+- linearizable reads via ReadIndex: leader records commitIndex, sends a PingRequest/PingReply quorum round tagged with a per-read sequence number, waits for local apply to catch up, then answers, fails immediately if the node steps down mid-flight. adversarial test at 300 seeds, verified non-vacuous (isolated node still self-believed Leader in all 300 trials), cmd/detsim -mode=read demos it live
+- cluster membership changes (single-server add/remove): ConfigChange log entries take effect as soon as appended, not just once committed, matching the standard single-server safety argument. add test verifies a fresh node catches up via normal replication, remove test verifies a removed node is excluded from quorum math. 300-seed stress test verified non-vacuous too: the removed node keeps campaigning in every trial (it's never told it was removed) and Raft's per-term single-vote invariant still prevents split brain regardless. known gap: an uncommitted config-change entry that gets truncated away by a later conflicting leader is not rolled back, narrow edge case, documented rather than silently ignored
+- WAL replay idempotency: recovering twice from unchanged storage is identical, writing after recovery correctly resumes from the right offset, and a 200-seed torn-write stress test proves monotonicity (once a key is recovered, it never disappears or changes in a later cycle), not the stronger and actually-false claim that everything ever synced must always reappear
+- disk-full fault type: FaultProfile.MaxSize, WriteAt returns ErrDiskFull and queues nothing when exceeded, kv.Store.Put now returns ok bool and propagates the failure instead of silently losing data
+- node IDs no longer hardcoded to single ASCII characters (fmt.Sprintf("node%d", i)), verified a 30-node cluster works, though the "caps at 26" framing in this todo used to overstate it, non-letter runes past 'Z' were still unique and functional, just ugly
+- benchmarks (go test -bench=.): a full election+partition+heal cycle over 8s of simulated time takes ~1.3ms real wall-clock, 100 committed entries ~0.9ms, a snapshot compaction cycle ~1.8ms
+- CI (.github/workflows/ci.yml): build, vet, gofmt check, full test suite with -race, go-version pinned via go-version-file so it can't drift from go.mod
+- verified the whole suite passes under -race, confirms the single-threaded-per-simulation architecture claim is actually true, not just asserted
+- fuzzing: FuzzRecoverNeverPanics feeds arbitrary bytes into kv.Store.Recover via FaultyStorage.SeedRaw, 340k+ executions with no panic found
+- LICENSE (MPL-2.0, switched from a custom attribution-required license so pkg.go.dev's detector would recognize it and render docs, OSI approval is a hard requirement there, no amount of rewording a custom license gets around that)
+- Network.Heal(a, b) for targeted partition removal, matches rt.Network's fine-grained API, previously only HealAll() existed
+- FaultyStorage.Size() no longer allocates a full materializedView just to get its length, extracted materializedLen() that computes the size without copying
+- cmd/detsim cluster setup deduplicated via raftCluster struct and newRaftCluster() helper, runRaft/runMembership/runRead no longer repeat the same node creation boilerplate
+- fixed stale -mode flag help text in cmd/detsim (said "raft or kv" but there are 4 modes)
+- godoc doc comments added to all exported symbols across every package (detsim root, rt, rewrite, minimize, examples/raft, examples/kv, examples/workerpool)
+- found a real select-rewriting bug via a new end-to-end test: `case <-time.After(d)` style cases evaluated their channel expression twice (once for the ready check, once inside the commit closure), so readiness and commit could disagree; fixed by hoisting every case's channel expression into a temp evaluated exactly once in source order
+- detsim-trace (cmd/detsim-trace + traceview package): the failure-visualization piece. traces are now self-describing, rt.GoNamed labels goroutines and every scheduling decision records the virtual time it ran at plus what that goroutine blocked on afterward (chan send, mutex lock, sleep, finished), carried through Trace()/SaveTrace automatically. the viewer renders an annotated decision timeline, per-goroutine stats with block-reason histograms and the biggest virtual-time jumps, and a keep/drop diff between an original and minimized trace so you can see exactly which decisions the minimizer decided were load-bearing. detsim-test -minimize now preserves labels and steps into detsim_minimized_trace.json. color is auto (on for terminals, off when piped, NO_COLOR respected). old trace files without steps still view fine, just without the per-decision detail
+- rewrite passes are now type-driven instead of spelling-driven: aliased stdlib imports (mysync "sync") rewrite and prune correctly, a local variable shadowing make/close is left alone (checked via go/types), and type conversions like time.Duration(x) no longer warn as unsupported calls
+- rt.Sched.Shutdown(): a run ending in deadlock/panic/decision-limit used to leak its parked goroutines for the life of the process, which compounds fast in in-process seed sweeps; Shutdown releases them via runtime.Goexit so code under test never resumes after it, idempotent, race-checked
+- FaultyStorage.ReadAt now honors the io.ReaderAt contract (io.EOF on short/end reads, error not panic on negative offsets, same for WriteAt), making it usable as a drop-in io.ReaderAt
+- Sim.At no longer lets virtual time move backwards when handed an already-past timestamp (clamped to Now), After/At reject nil fns at scheduling time with a clear panic instead of mid-Run
+- rt.Once.Do now marks the Once done even if fn panics, matching sync.Once semantics
+- rt.File gained Name/Seek/ReadAt/WriteAt so rewritten *os.File-shaped code has the common methods available
+- cmd/detsim-test and cmd/detsim-rewrite restructured so the overlay temp dir is actually cleaned up on failure exit paths (os.Exit used to skip the deferred Close and leak /tmp dirs)
+- range-over-channel gets a precise warning during rewrite instead of failing later with a confusing compile error
 
 todo:
-- raft snapshotting / log compaction
-- linearizable reads (ReadIndex or lease reads)
-- cluster membership changes (add/remove node without full restart)
-- WAL replay idempotency test, crash during recovery
-- disk-full / out-of-space fault type in FaultyStorage
-- benchmarks
-- CI
-- godoc / pkg.go.dev polish
+- (none currently)
 
 rough edges:
-- examples/raft node IDs hardcoded to single uppercase letters, caps at 26 nodes
-- FaultyStorage grows its committed buffer but never shrinks/compacts
-- no fuzzing harness wired up yet (go-fuzz or go test -fuzz)
-- gosim-style real goroutine interception
-- extracting the deterministic scheduler as its own thing usable outside Go
+- FaultyStorage grows its committed buffer but never shrinks/compacts, accepted as-is, it's a fault-injection test double standing in for a disk, not a production storage engine, compaction isn't the property under test
+- gosim-style real goroutine interception is out of scope, documented in the README as a deliberate limitation, not a gap to close
+- "extracting the deterministic scheduler as its own thing usable outside Go" no longer makes sense as originally phrased, the core package is already fully decoupled from the examples (examples/raft and examples/kv only ever import the root package, never the reverse), and making it usable from outside Go entirely would mean FFI/cgo bindings, a different and much larger project not currently planned
+- Shutdown is terminal by design: released goroutines Goexit rather than resume, and calling it mid-Run is a caller bug, both documented on the method

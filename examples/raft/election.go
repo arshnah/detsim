@@ -33,7 +33,7 @@ func (n *Node) startElection() {
 	n.votesReceived = map[detsim.NodeID]bool{n.id: true}
 	n.scheduleElectionCheck()
 
-	lastIdx, lastTerm := n.lastLogInfo()
+	lastIdx, lastTerm := n.lastIndex(), n.lastTerm()
 	for _, p := range n.peers {
 		n.net.Send(n.id, p, RequestVote{
 			Term:         n.currentTerm,
@@ -49,6 +49,7 @@ func (n *Node) becomeFollower(term int) {
 	n.currentTerm = term
 	n.votedFor = ""
 	n.resetElectionTimer()
+	n.failAllPendingReads()
 }
 
 func (n *Node) becomeLeader() {
@@ -56,7 +57,7 @@ func (n *Node) becomeLeader() {
 	n.leaderGen++
 	n.nextIndex = make(map[detsim.NodeID]int)
 	n.matchIndex = make(map[detsim.NodeID]int)
-	lastIdx := n.log[len(n.log)-1].Index
+	lastIdx := n.lastIndex()
 	for _, p := range n.peers {
 		n.nextIndex[p] = lastIdx + 1
 		n.matchIndex[p] = 0

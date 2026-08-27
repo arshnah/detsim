@@ -7,6 +7,8 @@ import (
 	"github.com/arshnah/detsim"
 )
 
+// Store is a WAL-based key-value store backed by FaultyStorage, with optional
+// per-entry CRC32 checksums.
 type Store struct {
 	storage   *detsim.FaultyStorage
 	checksums bool
@@ -14,6 +16,8 @@ type Store struct {
 	data      map[string][]byte
 }
 
+// NewStore creates a Store. If checksums is true, each WAL entry includes a CRC32
+// checksum that catches torn writes and byte corruption during recovery.
 func NewStore(storage *detsim.FaultyStorage, checksums bool) *Store {
 	return &Store{
 		storage:   storage,
@@ -47,22 +51,33 @@ func encodeEntry(key, value []byte, withChecksum bool) []byte {
 	return buf
 }
 
-func (s *Store) Put(key, value string) {
+// Put writes a key-value pair to the WAL. Returns false if the underlying storage
+// is full (ErrDiskFull).
+func (s *Store) Put(key, value string) (ok bool) {
 	entry := encodeEntry([]byte(key), []byte(value), s.checksums)
-	s.storage.WriteAt(entry, s.writeAt)
+	if _, err := s.storage.WriteAt(entry, s.writeAt); err != nil {
+		return false
+	}
 	s.writeAt += int64(len(entry))
 	s.data[key] = []byte(value)
+	return true
 }
 
+// Sync commits all pending WAL writes to durable storage.
 func (s *Store) Sync() { s.storage.Sync() }
 
+// Get retrieves the value for key from the in-memory index.
 func (s *Store) Get(key string) (string, bool) {
 	v, ok := s.data[key]
 	return string(v), ok
 }
 
+// Len returns the number of keys currently in the store.
 func (s *Store) Len() int { return len(s.data) }
 
+// Recover replays the WAL from storage up to maxOffset, rebuilding the in-memory
+// index. Entries with valid checksums are accepted; torn or corrupted entries stop
+// the scan.
 func (s *Store) Recover(maxOffset int64) {
 	s.data = make(map[string][]byte)
 	s.writeAt = 0

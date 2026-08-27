@@ -16,15 +16,13 @@ func (n *Node) sendHeartbeats(term, gen int) {
 
 func (n *Node) replicateTo(peer detsim.NodeID) {
 	next := n.nextIndex[peer]
+	if next <= n.baseIndex() {
+		n.sendInstallSnapshot(peer)
+		return
+	}
 	prevIdx := next - 1
-	prevTerm := 0
-	if prevIdx >= 0 && prevIdx < len(n.log) {
-		prevTerm = n.log[prevIdx].Term
-	}
-	var entries []LogEntry
-	if next >= 0 && next < len(n.log) {
-		entries = append(entries, n.log[next:]...)
-	}
+	prevTerm, _ := n.termAt(prevIdx)
+	entries := append([]LogEntry(nil), n.entriesFrom(next)...)
 	n.net.Send(n.id, peer, AppendEntries{
 		Term:         n.currentTerm,
 		LeaderID:     n.id,
@@ -36,8 +34,9 @@ func (n *Node) replicateTo(peer detsim.NodeID) {
 }
 
 func (n *Node) advanceCommitIndex() {
-	for idx := n.log[len(n.log)-1].Index; idx > n.commitIndex; idx-- {
-		if idx < 0 || idx >= len(n.log) || n.log[idx].Term != n.currentTerm {
+	for idx := n.lastIndex(); idx > n.commitIndex && idx > n.baseIndex(); idx-- {
+		term, ok := n.termAt(idx)
+		if !ok || term != n.currentTerm {
 			continue
 		}
 		count := 1
@@ -57,6 +56,10 @@ func (n *Node) advanceCommitIndex() {
 func (n *Node) applyCommitted() {
 	for n.lastApplied < n.commitIndex {
 		n.lastApplied++
-		n.Committed = append(n.Committed, n.log[n.lastApplied])
+		if n.hasIndex(n.lastApplied) {
+			n.Committed = append(n.Committed, n.entryAt(n.lastApplied))
+		}
 	}
+	n.maybeCompact()
+	n.tryResolveReads()
 }

@@ -42,6 +42,30 @@ func TestUnsyncedWritesLostButNotCorrupt(t *testing.T) {
 	}
 }
 
+func TestPutSurfacesDiskFullInsteadOfSilentlyLosingData(t *testing.T) {
+	fs := detsim.NewFaultyStorage(1, detsim.FaultProfile{MaxSize: 40})
+	s := NewStore(fs, true)
+
+	if ok := s.Put("a", "1"); !ok {
+		t.Fatal("expected the first, small write to fit and succeed")
+	}
+	s.Sync()
+
+	ok := s.Put("this-key-and-value-are-long-enough-to-overflow", "the-remaining-capacity-on-this-tiny-disk")
+	if ok {
+		t.Fatal("expected Put to report failure when the underlying disk is full, not silently pretend success")
+	}
+	if _, present := s.Get("this-key-and-value-are-long-enough-to-overflow"); present {
+		t.Fatal("expected a failed Put to not update in-memory state either, that would make Get lie about what's actually durable")
+	}
+
+	recovered := NewStore(fs, true)
+	recovered.Recover(1 << 20)
+	if v, ok := recovered.Get("a"); !ok || v != "1" {
+		t.Fatalf("expected the earlier successful write to still be intact after a later write hit disk-full, got %q ok=%v", v, ok)
+	}
+}
+
 func TestChecksummedStoreNeverServesCorruptData(t *testing.T) {
 	const trials = 2000
 	for seed := int64(1); seed <= trials; seed++ {

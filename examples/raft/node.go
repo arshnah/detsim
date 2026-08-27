@@ -6,6 +6,8 @@ import (
 	"github.com/arshnah/detsim"
 )
 
+// Node is a single Raft node participating in leader election, log replication,
+// snapshots, linearizable reads, and cluster membership changes.
 type Node struct {
 	id    detsim.NodeID
 	peers []detsim.NodeID
@@ -28,9 +30,14 @@ type Node struct {
 	matchIndex map[detsim.NodeID]int
 	leaderGen  int
 
+	readSeq      int
+	pendingReads []*pendingRead
+
 	Committed []LogEntry
 }
 
+// NewNode creates a Raft node and registers it on the network. Call Start to begin
+// participating in elections.
 func NewNode(id detsim.NodeID, peers []detsim.NodeID, net *detsim.Network, sim *detsim.Sim, seed int64) *Node {
 	n := &Node{
 		id:    id,
@@ -45,22 +52,24 @@ func NewNode(id detsim.NodeID, peers []detsim.NodeID, net *detsim.Network, sim *
 	return n
 }
 
+// Start kicks off the election timer so this node begins participating in the cluster.
 func (n *Node) Start() {
 	n.scheduleElectionCheck()
 }
 
+// State returns the node's current role and term.
 func (n *Node) State() (State, int) { return n.state, n.currentTerm }
 
+// ID returns the node's unique identifier.
+func (n *Node) ID() detsim.NodeID { return n.id }
+
+// Submit appends cmd to the leader's log. Returns the log index and true on success,
+// or (0, false) if this node is not the current leader.
 func (n *Node) Submit(cmd string) (index int, isLeader bool) {
 	if n.state != Leader {
 		return 0, false
 	}
-	idx := n.log[len(n.log)-1].Index + 1
+	idx := n.lastIndex() + 1
 	n.log = append(n.log, LogEntry{Term: n.currentTerm, Index: idx, Command: cmd})
 	return idx, true
-}
-
-func (n *Node) lastLogInfo() (index, term int) {
-	last := n.log[len(n.log)-1]
-	return last.Index, last.Term
 }
